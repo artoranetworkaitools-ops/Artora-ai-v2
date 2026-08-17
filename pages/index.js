@@ -1,13 +1,29 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import Head from "next/head";
 
-const SIDEBAR_BG = "#171717";
-const ROW_ACTIVE = "#2A2A2A";
-const MAIN_BG = "#FFFFFF";
-const BORDER = "#E5E5E5";
-const TEXT_PRIMARY = "#0D0D0D";
-const TEXT_MUTED = "#8E8E8E";
 const ACCENT = "#189CB1";
+
+const LIGHT = {
+  sidebarBg: "#171717",
+  rowActive: "#2A2A2A",
+  mainBg: "#FFFFFF",
+  border: "#E5E5E5",
+  textPrimary: "#0D0D0D",
+  textMuted: "#8E8E8E",
+  inputBg: "#F7F7F8",
+  cardBg: "#F7F7F8",
+};
+
+const DARK = {
+  sidebarBg: "#0D0D0D",
+  rowActive: "#2E2E2E",
+  mainBg: "#212121",
+  border: "#3A3A3A",
+  textPrimary: "#ECECEC",
+  textMuted: "#9B9B9B",
+  inputBg: "#2A2A2A",
+  cardBg: "#2A2A2A",
+};
 
 const WELCOME = { role: "assistant", content: "Hi! I'm Artora AI. Ask me anything — I'll reply in whichever language you write in." };
 
@@ -47,7 +63,7 @@ function renderMarkdown(text) {
     });
   }
 
-  lines.forEach((line, idx) => {
+  lines.forEach((line) => {
     const trimmed = line.trim();
     const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
     const numberedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
@@ -75,11 +91,7 @@ function renderMarkdown(text) {
       blocks.push(<div key={blocks.length} style={{ height: 8 }} />);
     } else {
       flushList();
-      blocks.push(
-        <div key={blocks.length} style={{ marginBottom: 4 }}>
-          {renderInline(line)}
-        </div>
-      );
+      blocks.push(<div key={blocks.length} style={{ marginBottom: 4 }}>{renderInline(line)}</div>);
     }
   });
   flushList();
@@ -105,13 +117,21 @@ export default function Home() {
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  const [kbModalOpen, setKbModalOpen] = useState(false);
+  const [theme, setTheme] = useState("light");
+
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminTab, setAdminTab] = useState("train");
   const [kbEntries, setKbEntries] = useState([]);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminHistory, setAdminHistory] = useState([]);
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const c = theme === "dark" ? DARK : LIGHT;
 
   useEffect(() => {
     const check = () => {
@@ -126,7 +146,15 @@ export default function Home() {
 
   useEffect(() => {
     checkAuth();
+    const savedTheme = localStorage.getItem("artora-ai-theme");
+    if (savedTheme) setTheme(savedTheme);
   }, []);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    localStorage.setItem("artora-ai-theme", next);
+  }
 
   async function checkAuth() {
     try {
@@ -217,6 +245,39 @@ export default function Home() {
     }
   }
 
+  async function loadAdminUsers() {
+    try {
+      const res = await fetch("/api/admin/users");
+      const data = await res.json();
+      setAdminUsers(data.users || []);
+    } catch {
+      setAdminUsers([]);
+    }
+  }
+
+  async function loadAdminHistory() {
+    try {
+      const res = await fetch("/api/admin/history");
+      const data = await res.json();
+      setAdminHistory(data.history || []);
+    } catch {
+      setAdminHistory([]);
+    }
+  }
+
+  function openAdminPanel() {
+    setAdminModalOpen(true);
+    setAdminTab("train");
+    loadKB();
+    if (isMobile) setSidebarOpen(false);
+  }
+
+  function switchAdminTab(tab) {
+    setAdminTab(tab);
+    if (tab === "users") loadAdminUsers();
+    if (tab === "history") loadAdminHistory();
+  }
+
   async function addEntry() {
     if (!newTitle.trim() || !newContent.trim()) return;
     try {
@@ -252,12 +313,25 @@ export default function Home() {
     }
   }
 
-  const activeConvo = convos.find((c) => c.id === activeId) || convos[0];
+  function handleFileUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!newTitle.trim()) setNewTitle(file.name.replace(/\.[^/.]+$/, ""));
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = String(ev.target.result).slice(0, 4000);
+      setNewContent(text);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  const activeConvo = convos.find((c2) => c2.id === activeId) || convos[0];
 
   function startNewChat() {
-    const c = newConvo();
-    setConvos((prev) => [c, ...prev]);
-    setActiveId(c.id);
+    const conv = newConvo();
+    setConvos((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
     setErrorMsg("");
     if (isMobile) setSidebarOpen(false);
   }
@@ -270,11 +344,11 @@ export default function Home() {
   function deleteConvo(id, e) {
     e.stopPropagation();
     setConvos((prev) => {
-      const updated = prev.filter((c) => c.id !== id);
+      const updated = prev.filter((cv) => cv.id !== id);
       if (updated.length === 0) {
-        const c = newConvo();
-        setActiveId(c.id);
-        return [c];
+        const conv = newConvo();
+        setActiveId(conv.id);
+        return [conv];
       }
       if (id === activeId) setActiveId(updated[0].id);
       return updated;
@@ -282,7 +356,7 @@ export default function Home() {
   }
 
   function updateConvoMessages(id, messages, title) {
-    setConvos((prev) => prev.map((c) => (c.id === id ? { ...c, messages, title: title || c.title } : c)));
+    setConvos((prev) => prev.map((cv) => (cv.id === id ? { ...cv, messages, title: title || cv.title } : cv)));
   }
 
   async function sendMessage() {
@@ -333,8 +407,8 @@ export default function Home() {
 
   if (authLoading) {
     return (
-      <div style={styles.authLoadingScreen}>
-        <div style={styles.logoDotBig} />
+      <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+        <div style={{ width: 40, height: 40, borderRadius: "50%", background: ACCENT }} />
       </div>
     );
   }
@@ -343,34 +417,34 @@ export default function Home() {
     return (
       <>
         {headTags}
-        <div style={styles.authScreen}>
-          <div className="auth-card" style={styles.authCard}>
-            <div style={styles.authBrandRow}>
-              <div style={styles.logoDot} />
-              <span style={styles.authBrandText}>Artora AI</span>
+        <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FAFAFA" }}>
+          <div className="auth-card" style={{ width: 360, background: "#fff", border: "1px solid #E5E5E5", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: ACCENT }} />
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Artora AI</span>
             </div>
-            <h2 style={styles.authTitle}>{authMode === "login" ? "Welcome back" : "Create your account"}</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 8px" }}>{authMode === "login" ? "Welcome back" : "Create your account"}</h2>
             {authMode === "signup" && (
-              <input placeholder="Full name" value={authName} onChange={(e) => setAuthName(e.target.value)} style={styles.authInput} />
+              <input placeholder="Full name" value={authName} onChange={(e) => setAuthName(e.target.value)} style={authInputStyle} />
             )}
-            <input placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} style={styles.authInput} />
+            <input placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} style={authInputStyle} />
             <input
               placeholder="Password"
               type="password"
               value={authPassword}
               onChange={(e) => setAuthPassword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAuthSubmit()}
-              style={styles.authInput}
+              style={authInputStyle}
             />
-            {authError && <div style={styles.authError}>{authError}</div>}
-            <button onClick={handleAuthSubmit} disabled={authBusy} style={styles.authSubmitBtn}>
+            {authError && <div style={{ fontSize: 12, color: "#E24B4A" }}>{authError}</div>}
+            <button onClick={handleAuthSubmit} disabled={authBusy} style={{ background: ACCENT, color: "#fff", border: "none", borderRadius: 10, padding: "11px 14px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 4 }}>
               {authBusy ? "..." : authMode === "login" ? "Log in" : "Sign up"}
             </button>
-            <div style={styles.authSwitchRow}>
+            <div style={{ fontSize: 13, color: "#8E8E8E", textAlign: "center", marginTop: 4 }}>
               {authMode === "login" ? (
-                <>Naya account? <span style={styles.authSwitchLink} onClick={() => { setAuthMode("signup"); setAuthError(""); }}>Sign up</span></>
+                <>Naya account? <span style={{ color: ACCENT, cursor: "pointer", fontWeight: 500 }} onClick={() => { setAuthMode("signup"); setAuthError(""); }}>Sign up</span></>
               ) : (
-                <>Already an account? <span style={styles.authSwitchLink} onClick={() => { setAuthMode("login"); setAuthError(""); }}>Log in</span></>
+                <>Already an account? <span style={{ color: ACCENT, cursor: "pointer", fontWeight: 500 }} onClick={() => { setAuthMode("login"); setAuthError(""); }}>Log in</span></>
               )}
             </div>
           </div>
@@ -392,128 +466,125 @@ export default function Home() {
   return (
     <>
       {headTags}
-      <div style={styles.app}>
-        {isMobile && sidebarOpen && <div style={styles.mobileOverlay} onClick={() => setSidebarOpen(false)} />}
+      <div style={{ display: "flex", height: "100vh", background: c.mainBg, color: c.textPrimary, overflow: "hidden", position: "relative" }}>
+        {isMobile && sidebarOpen && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40 }} onClick={() => setSidebarOpen(false)} />}
 
         <div
           className="sidebar"
           style={{
-            ...styles.sidebar,
-            ...(isMobile ? styles.sidebarMobile : {}),
-            ...(sidebarOpen ? {} : isMobile ? styles.sidebarMobileClosed : styles.sidebarClosed),
+            width: 280,
+            background: c.sidebarBg,
+            color: "#ECECEC",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            padding: "10px 10px 0",
+            transition: "transform 0.2s ease",
+            ...(isMobile ? { position: "fixed", top: 0, left: 0, bottom: 0, width: "82vw", maxWidth: 300, zIndex: 50, boxShadow: "2px 0 12px rgba(0,0,0,0.3)" } : {}),
+            ...(sidebarOpen ? {} : isMobile ? { transform: "translateX(-100%)" } : { width: 0, padding: 0, overflow: "hidden" }),
           }}
         >
-          <div style={styles.sidebarHeader}>
-            <div style={styles.brandRow}>
-              <div style={styles.logoDot} />
-              <span style={styles.brandText}>Artora AI</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: ACCENT }} />
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Artora AI</span>
             </div>
-            <button onClick={() => setSidebarOpen(false)} style={styles.iconBtnGhost}>‹</button>
+            <button onClick={() => setSidebarOpen(false)} style={ghostBtnStyle}>‹</button>
           </div>
 
-          <button onClick={startNewChat} style={styles.newChatBtn}>
+          <button onClick={startNewChat} style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "1px solid #3A3A3A", color: "#ECECEC", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", marginBottom: 6 }}>
             <span style={{ fontSize: 15 }}>+</span> New chat
           </button>
 
           {user.role === "admin" && (
-            <button onClick={() => { setKbModalOpen(true); if (isMobile) setSidebarOpen(false); }} style={styles.kbNavBtn}>
-              <span>⚙️</span> Admin — train AI
+            <button onClick={openAdminPanel} style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "#ECECEC", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", marginBottom: 4, textAlign: "left" }}>
+              <span>⚙️</span> Admin dashboard
             </button>
           )}
 
-          <div style={styles.recentsLabel}>Recents</div>
-          <div style={styles.convoList}>
-            {convos.map((c) => (
+          <button onClick={toggleTheme} style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "#ECECEC", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", marginBottom: 10, textAlign: "left" }}>
+            <span>{theme === "light" ? "🌙" : "☀️"}</span> {theme === "light" ? "Dark mode" : "Light mode"}
+          </button>
+
+          <div style={{ fontSize: 11, color: "#8E8E8E", padding: "6px 12px 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Recents</div>
+          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+            {convos.map((cv) => (
               <div
-                key={c.id}
-                onClick={() => selectConvo(c.id)}
-                style={{ ...styles.convoItem, background: c.id === activeId ? ROW_ACTIVE : "transparent" }}
+                key={cv.id}
+                onClick={() => selectConvo(cv.id)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 8, cursor: "pointer", gap: 8, background: cv.id === activeId ? "#2A2A2A" : "transparent" }}
               >
-                <span style={styles.convoTitle}>{c.title}</span>
-                <button onClick={(e) => deleteConvo(c.id, e)} style={styles.convoDeleteBtn}>✕</button>
+                <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{cv.title}</span>
+                <button onClick={(e) => deleteConvo(cv.id, e)} style={{ background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 11, flexShrink: 0 }}>✕</button>
               </div>
             ))}
           </div>
 
-          <div style={styles.sidebarFooter}>
+          <div style={{ fontSize: 11, color: "#8E8E8E", padding: "10px 12px", borderTop: "1px solid #2A2A2A" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontWeight: 500, color: "#ECECEC" }}>{user.name}</div>
                 <div style={{ fontSize: 10 }}>{user.role === "admin" ? "Admin" : "Member"}</div>
               </div>
-              <button onClick={handleLogout} style={styles.logoutBtn}>Logout</button>
+              <button onClick={handleLogout} style={{ background: "transparent", border: "1px solid #3A3A3A", color: "#ECECEC", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer" }}>Logout</button>
             </div>
           </div>
         </div>
 
-        <div style={styles.main}>
-          <div className="topbar" style={styles.topbar}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: `1px solid ${c.border}`, gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-              {!sidebarOpen && <button onClick={() => setSidebarOpen(true)} style={styles.menuBtn}>☰</button>}
-              <span className="topbar-title" style={styles.topbarTitle}>{activeConvo.title}</span>
+              {!sidebarOpen && <button onClick={() => setSidebarOpen(true)} style={{ background: "transparent", border: "none", color: c.textPrimary, cursor: "pointer", fontSize: 18, flexShrink: 0 }}>☰</button>}
+              <span className="topbar-title" style={{ fontWeight: 600, fontSize: 14 }}>{activeConvo.title}</span>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              {webSearch && <span style={styles.activePill}>🌐 Search</span>}
-              {deepResearch && <span style={styles.activePill}>🔎 Research</span>}
+              {webSearch && <span style={{ background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 20, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" }}>🌐 Search</span>}
+              {deepResearch && <span style={{ background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 20, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" }}>🔎 Research</span>}
             </div>
           </div>
 
-          <div ref={scrollRef} style={styles.chatArea}>
-            <div className="chat-inner" style={styles.chatInner}>
+          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
+            <div className="chat-inner" style={{ maxWidth: 760, margin: "0 auto", padding: "24px 24px 8px" }}>
               {activeConvo.messages.map((m, i) =>
                 m.role === "user" ? (
-                  <div key={i} className="msg-row-user" style={styles.msgRowUser}>
-                    <div className="user-bubble" style={styles.userBubble}>{m.content}</div>
+                  <div key={i} className="msg-row-user" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 20 }}>
+                    <div className="user-bubble" style={{ maxWidth: "75%", background: ACCENT, color: "#fff", borderRadius: 18, padding: "10px 16px", fontSize: 15, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content}</div>
                   </div>
                 ) : (
-                  <div key={i} className="msg-row-assistant" style={styles.msgRowAssistant}>
-                    <div className="assistant-text" style={styles.assistantText}>{renderMarkdown(m.content)}</div>
+                  <div key={i} className="msg-row-assistant" style={{ display: "flex", justifyContent: "flex-start", marginBottom: 20 }}>
+                    <div className="assistant-text" style={{ maxWidth: "100%", fontSize: 15, lineHeight: 1.7, wordBreak: "break-word" }}>{renderMarkdown(m.content)}</div>
                   </div>
                 )
               )}
               {loading && (
-                <div className="msg-row-assistant" style={styles.msgRowAssistant}>
-                  <div style={{ ...styles.assistantText, color: TEXT_MUTED }}>
-                    {deepResearch ? "Researching thoroughly..." : "Thinking..."}
-                  </div>
+                <div className="msg-row-assistant" style={{ display: "flex", justifyContent: "flex-start", marginBottom: 20 }}>
+                  <div style={{ fontSize: 15, color: c.textMuted }}>{deepResearch ? "Researching thoroughly..." : "Thinking..."}</div>
                 </div>
               )}
-              {errorMsg && <div style={styles.errorBox}>{errorMsg}</div>}
+              {errorMsg && <div style={{ fontSize: 12, color: "#E24B4A", padding: "8px 0" }}>{errorMsg}</div>}
             </div>
           </div>
 
-          <div className="input-bar-wrap" style={styles.inputBarWrap}>
-            <div className="input-bar" style={{ ...styles.inputBar, position: "relative" }}>
-              <button
-                onClick={() => setPlusMenuOpen((v) => !v)}
-                style={styles.plusBtn}
-                type="button"
-              >
-                +
-              </button>
+          <div className="input-bar-wrap" style={{ padding: "0 24px 20px" }}>
+            <div className="input-bar" style={{ maxWidth: 760, margin: "0 auto", display: "flex", gap: 10, alignItems: "flex-end", background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 24, padding: "12px 12px 12px 12px", boxShadow: "0 2px 10px rgba(0,0,0,0.04)", position: "relative" }}>
+              <button onClick={() => setPlusMenuOpen((v) => !v)} type="button" style={{ width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${c.border}`, cursor: "pointer", fontSize: 18, color: c.textMuted, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
               {plusMenuOpen && (
                 <>
-                  <div style={styles.plusMenuOverlay} onClick={() => setPlusMenuOpen(false)} />
-                  <div style={styles.plusMenu}>
-                    <button
-                      onClick={() => { setWebSearch((v) => !v); setPlusMenuOpen(false); }}
-                      style={{ ...styles.plusMenuItem, ...(webSearch ? styles.plusMenuItemActive : {}) }}
-                    >
+                  <div style={{ position: "fixed", inset: 0, zIndex: 69 }} onClick={() => setPlusMenuOpen(false)} />
+                  <div style={{ position: "absolute", bottom: "calc(100% + 10px)", left: 0, width: 260, background: c.mainBg, border: `1px solid ${c.border}`, borderRadius: 14, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, zIndex: 70, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <button onClick={() => { setWebSearch((v) => !v); setPlusMenuOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 10, background: webSearch ? "rgba(24,156,177,0.08)" : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", fontSize: 13, color: c.textPrimary, textAlign: "left" }}>
                       <span>🌐</span>
-                      <span style={{ flex: 1, textAlign: "left" }}>
+                      <span style={{ flex: 1 }}>
                         <div style={{ fontWeight: 500 }}>Web search</div>
-                        <div style={{ fontSize: 11, color: TEXT_MUTED }}>Find real-time info from Google</div>
+                        <div style={{ fontSize: 11, color: c.textMuted }}>Find real-time info from Google</div>
                       </span>
                       {webSearch && <span style={{ color: ACCENT }}>✓</span>}
                     </button>
-                    <button
-                      onClick={() => { setDeepResearch((v) => !v); setPlusMenuOpen(false); }}
-                      style={{ ...styles.plusMenuItem, ...(deepResearch ? styles.plusMenuItemActive : {}) }}
-                    >
+                    <button onClick={() => { setDeepResearch((v) => !v); setPlusMenuOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 10, background: deepResearch ? "rgba(24,156,177,0.08)" : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", fontSize: 13, color: c.textPrimary, textAlign: "left" }}>
                       <span>🔎</span>
-                      <span style={{ flex: 1, textAlign: "left" }}>
+                      <span style={{ flex: 1 }}>
                         <div style={{ fontWeight: 500 }}>Deep research</div>
-                        <div style={{ fontSize: 11, color: TEXT_MUTED }}>Thorough, well-checked answers</div>
+                        <div style={{ fontSize: 11, color: c.textMuted }}>Thorough, well-checked answers</div>
                       </span>
                       {deepResearch && <span style={{ color: ACCENT }}>✓</span>}
                     </button>
@@ -526,40 +597,104 @@ export default function Home() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask anything..."
-                style={styles.textInput}
                 rows={1}
+                style={{ flex: 1, background: "transparent", border: "none", color: c.textPrimary, fontSize: 15, resize: "none", maxHeight: 160, lineHeight: 1.5, padding: "6px 0" }}
               />
-              <button onClick={sendMessage} disabled={loading || !input.trim()} style={styles.sendBtn}>↑</button>
+              <button onClick={sendMessage} disabled={loading || !input.trim()} style={{ width: 34, height: 34, borderRadius: "50%", background: ACCENT, border: "none", cursor: "pointer", fontSize: 17, color: "#fff", flexShrink: 0 }}>↑</button>
             </div>
-            <div className="disclaimer" style={styles.disclaimer}>Artora AI can make mistakes. Check important info.</div>
+            <div className="disclaimer" style={{ textAlign: "center", fontSize: 11, color: c.textMuted, marginTop: 10 }}>Artora AI can make mistakes. Check important info.</div>
           </div>
         </div>
 
-        {kbModalOpen && user.role === "admin" && (
-          <div style={styles.modalOverlay} onClick={() => setKbModalOpen(false)}>
-            <div className="modal" style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalHeader}>
-                <span style={{ fontWeight: 600, fontSize: 16 }}>Train Artora AI (Admin)</span>
-                <button onClick={() => setKbModalOpen(false)} style={styles.iconBtnGhostDark}>✕</button>
+        {adminModalOpen && user.role === "admin" && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }} onClick={() => setAdminModalOpen(false)}>
+            <div className="modal" style={{ background: c.mainBg, color: c.textPrimary, borderRadius: 16, width: 560, maxWidth: "90vw", maxHeight: "82vh", display: "flex", flexDirection: "column", padding: 20 }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: 16 }}>Admin dashboard</span>
+                <button onClick={() => setAdminModalOpen(false)} style={{ background: "transparent", border: "none", color: c.textMuted, cursor: "pointer", fontSize: 16 }}>✕</button>
               </div>
-              <p style={styles.modalSub}>Ye data sab users ko chat ke jawab mein reflect hoga. Sirf admin add/delete kar sakta hai.</p>
-              <div style={styles.modalAddBox}>
-                <input placeholder="Title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} style={styles.modalInput} />
-                <textarea placeholder="Content" value={newContent} onChange={(e) => setNewContent(e.target.value)} style={{ ...styles.modalInput, minHeight: 70, resize: "vertical" }} />
-                <button onClick={addEntry} style={styles.modalAddBtn}>Add entry</button>
-              </div>
-              <div style={styles.modalKbList}>
-                {kbEntries.length === 0 && <div style={styles.modalEmptyText}>No entries yet.</div>}
-                {kbEntries.map((e) => (
-                  <div key={e.id} style={styles.modalKbItem}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={styles.modalKbTitle}>{e.title}</div>
-                      <div style={styles.modalKbContent}>{e.content}</div>
-                    </div>
-                    <button onClick={() => deleteEntry(e.id)} style={styles.modalKbDeleteBtn}>🗑</button>
-                  </div>
+
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, borderBottom: `1px solid ${c.border}`, paddingBottom: 10 }}>
+                {[
+                  { id: "train", label: "Train AI" },
+                  { id: "users", label: "Users" },
+                  { id: "history", label: "Chat history" },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => switchAdminTab(t.id)}
+                    style={{
+                      background: adminTab === t.id ? "rgba(24,156,177,0.1)" : "transparent",
+                      border: adminTab === t.id ? `1px solid ${ACCENT}` : `1px solid ${c.border}`,
+                      color: adminTab === t.id ? ACCENT : c.textMuted,
+                      borderRadius: 20,
+                      padding: "6px 14px",
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t.label}
+                  </button>
                 ))}
               </div>
+
+              {adminTab === "train" && (
+                <>
+                  <p style={{ fontSize: 12, color: c.textMuted, lineHeight: 1.5, margin: "0 0 12px" }}>
+                    Ye data sab users ko chat ke jawab mein reflect hoga. Text file upload karke bhi content bhar sakte hain.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, background: c.cardBg, padding: 12, borderRadius: 10, border: `1px solid ${c.border}`, marginBottom: 12 }}>
+                    <input placeholder="Title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} style={{ background: c.mainBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: c.textPrimary }} />
+                    <textarea placeholder="Content" value={newContent} onChange={(e) => setNewContent(e.target.value)} style={{ background: c.mainBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: c.textPrimary, minHeight: 70, resize: "vertical" }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={addEntry} style={{ background: ACCENT, color: "#fff", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 500, cursor: "pointer", flex: 1 }}>Add entry</button>
+                      <button onClick={() => fileInputRef.current?.click()} style={{ background: "transparent", color: c.textPrimary, border: `1px solid ${c.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, cursor: "pointer" }}>📎 Upload .txt</button>
+                      <input ref={fileInputRef} type="file" accept=".txt,.md,.csv" onChange={handleFileUpload} style={{ display: "none" }} />
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, maxHeight: 280 }}>
+                    {kbEntries.length === 0 && <div style={{ fontSize: 12, color: c.textMuted, textAlign: "center", padding: 20 }}>No entries yet.</div>}
+                    {kbEntries.map((e) => (
+                      <div key={e.id} style={{ display: "flex", gap: 8, background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10, alignItems: "flex-start" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2, color: "#0E9CB4" }}>{e.title}</div>
+                          <div style={{ fontSize: 12, color: c.textMuted, lineHeight: 1.4 }}>{e.content}</div>
+                        </div>
+                        <button onClick={() => deleteEntry(e.id)} style={{ background: "transparent", border: "none", color: c.textMuted, cursor: "pointer", fontSize: 13 }}>🗑</button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {adminTab === "users" && (
+                <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, maxHeight: 380 }}>
+                  {adminUsers.length === 0 && <div style={{ fontSize: 12, color: c.textMuted, textAlign: "center", padding: 20 }}>Loading...</div>}
+                  {adminUsers.map((u) => (
+                    <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{u.name}</div>
+                        <div style={{ fontSize: 12, color: c.textMuted }}>{u.email}</div>
+                      </div>
+                      <span style={{ fontSize: 11, background: u.role === "admin" ? "rgba(24,156,177,0.12)" : "transparent", color: u.role === "admin" ? ACCENT : c.textMuted, border: `1px solid ${u.role === "admin" ? ACCENT : c.border}`, borderRadius: 12, padding: "3px 10px" }}>
+                        {u.role === "admin" ? "Admin" : "Member"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {adminTab === "history" && (
+                <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, maxHeight: 380 }}>
+                  {adminHistory.length === 0 && <div style={{ fontSize: 12, color: c.textMuted, textAlign: "center", padding: 20 }}>Abhi tak koi conversation nahi.</div>}
+                  {adminHistory.map((h) => (
+                    <div key={h.id} style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: "#0E9CB4" }}>Q: {h.user}</div>
+                      <div style={{ fontSize: 12, color: c.textMuted, lineHeight: 1.5 }}>{h.assistant.slice(0, 220)}{h.assistant.length > 220 ? "..." : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -575,12 +710,10 @@ export default function Home() {
           .msg-row-user, .msg-row-assistant { margin-bottom: 16px !important; }
           .user-bubble, .assistant-text { font-size: 14px !important; }
           .input-bar-wrap { padding: 0 12px 14px !important; }
-          .input-bar { border-radius: 20px !important; padding: 8px 8px 8px 14px !important; }
+          .input-bar { border-radius: 20px !important; }
           .disclaimer { font-size: 10px !important; }
           .topbar { padding: 10px 12px !important; }
           .topbar-title { font-size: 13px !important; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .toggle-row { gap: 6px !important; }
-          .toggle-label { display: none; }
           .modal { width: 94vw !important; max-height: 88vh !important; padding: 16px !important; }
         }
       `}</style>
@@ -588,117 +721,5 @@ export default function Home() {
   );
 }
 
-const styles = {
-  authLoadingScreen: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" },
-  logoDotBig: { width: 40, height: 40, borderRadius: "50%", background: ACCENT },
-  authScreen: { height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FAFAFA" },
-  authCard: { width: 360, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 12 },
-  authBrandRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 },
-  logoDot: { width: 10, height: 10, borderRadius: "50%", background: ACCENT },
-  authBrandText: { fontWeight: 600, fontSize: 14, color: TEXT_PRIMARY },
-  authTitle: { fontSize: 20, fontWeight: 600, margin: "0 0 8px", color: TEXT_PRIMARY },
-  authInput: { border: `1px solid ${BORDER}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: TEXT_PRIMARY },
-  authError: { fontSize: 12, color: "#E24B4A" },
-  authSubmitBtn: { background: ACCENT, color: "#fff", border: "none", borderRadius: 10, padding: "11px 14px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 4 },
-  authSwitchRow: { fontSize: 13, color: TEXT_MUTED, textAlign: "center", marginTop: 4 },
-  authSwitchLink: { color: ACCENT, cursor: "pointer", fontWeight: 500 },
-  app: { display: "flex", height: "100vh", background: MAIN_BG, color: TEXT_PRIMARY, overflow: "hidden", position: "relative" },
-  mobileOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40 },
-  sidebar: { width: 280, background: SIDEBAR_BG, color: "#ECECEC", display: "flex", flexDirection: "column", flexShrink: 0, padding: "10px 10px 0", transition: "transform 0.2s ease" },
-  sidebarClosed: { width: 0, padding: 0, overflow: "hidden" },
-  sidebarMobile: { position: "fixed", top: 0, left: 0, bottom: 0, width: "82vw", maxWidth: 300, zIndex: 50, boxShadow: "2px 0 12px rgba(0,0,0,0.3)" },
-  sidebarMobileClosed: { transform: "translateX(-100%)" },
-  sidebarHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px 14px" },
-  brandRow: { display: "flex", alignItems: "center", gap: 8 },
-  brandText: { fontWeight: 600, fontSize: 14 },
-  iconBtnGhost: { background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: 18 },
-  iconBtnGhostDark: { background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: 16 },
-  newChatBtn: { display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "1px solid #3A3A3A", color: "#ECECEC", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", marginBottom: 6 },
-  kbNavBtn: { display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "#ECECEC", borderRadius: 10, padding: "10px 12px", fontSize: 13, cursor: "pointer", marginBottom: 10, textAlign: "left" },
-  recentsLabel: { fontSize: 11, color: "#8E8E8E", padding: "6px 12px 4px", textTransform: "uppercase", letterSpacing: 0.5 },
-  convoList: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 },
-  convoItem: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 8, cursor: "pointer", gap: 8 },
-  convoTitle: { fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 },
-  convoDeleteBtn: { background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 11, flexShrink: 0 },
-  sidebarFooter: { fontSize: 11, color: "#8E8E8E", padding: "10px 12px", borderTop: "1px solid #2A2A2A" },
-  logoutBtn: { background: "transparent", border: "1px solid #3A3A3A", color: "#ECECEC", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer" },
-  main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
-  topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: `1px solid ${BORDER}`, gap: 8 },
-  menuBtn: { background: "transparent", border: "none", color: TEXT_PRIMARY, cursor: "pointer", fontSize: 18, flexShrink: 0 },
-  topbarTitle: { fontWeight: 600, fontSize: 14, color: TEXT_PRIMARY },
-  toggleBtn: { background: "transparent", border: `1px solid ${BORDER}`, color: TEXT_MUTED, borderRadius: 20, padding: "6px 12px", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
-  toggleBtnActive: { background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT },
-  activePill: { background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 20, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" },
-  plusBtn: { width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${BORDER}`, cursor: "pointer", fontSize: 18, color: TEXT_MUTED, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" },
-  plusMenuOverlay: { position: "fixed", inset: 0, zIndex: 69 },
-  plusMenu: {
-    position: "absolute",
-    bottom: "calc(100% + 10px)",
-    left: 0,
-    width: 260,
-    background: "#fff",
-    border: `1px solid ${BORDER}`,
-    borderRadius: 14,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-    padding: 6,
-    zIndex: 70,
-    display: "flex",
-    flexDirection: "column",
-    gap: 2,
-  },
-  plusMenuItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    background: "transparent",
-    border: "none",
-    borderRadius: 8,
-    padding: "9px 10px",
-    cursor: "pointer",
-    fontSize: 13,
-    color: TEXT_PRIMARY,
-    textAlign: "left",
-  },
-  plusMenuItemActive: { background: "rgba(24,156,177,0.08)" },
-  chatArea: { flex: 1, overflowY: "auto" },
-  chatInner: { maxWidth: 760, margin: "0 auto", padding: "24px 24px 8px" },
-  msgRowUser: { display: "flex", justifyContent: "flex-end", marginBottom: 20 },
-  msgRowAssistant: { display: "flex", justifyContent: "flex-start", marginBottom: 20 },
-  userBubble: {
-    maxWidth: "75%",
-    background: ACCENT,
-    color: "#fff",
-    borderRadius: 18,
-    padding: "10px 16px",
-    fontSize: 15,
-    lineHeight: 1.6,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-  },
-  assistantText: {
-    maxWidth: "100%",
-    fontSize: 15,
-    lineHeight: 1.7,
-    color: TEXT_PRIMARY,
-    wordBreak: "break-word",
-  },
-  errorBox: { fontSize: 12, color: "#E24B4A", padding: "8px 0" },
-  inputBarWrap: { padding: "0 24px 20px" },
-  inputBar: { maxWidth: 760, margin: "0 auto", display: "flex", gap: 10, alignItems: "flex-end", background: "#F7F7F8", border: `1px solid ${BORDER}`, borderRadius: 24, padding: "12px 12px 12px 18px", boxShadow: "0 2px 10px rgba(0,0,0,0.04)" },
-  textInput: { flex: 1, background: "transparent", border: "none", color: TEXT_PRIMARY, fontSize: 15, resize: "none", maxHeight: 160, lineHeight: 1.5, padding: "6px 0" },
-  sendBtn: { width: 34, height: 34, borderRadius: "50%", background: ACCENT, border: "none", cursor: "pointer", fontSize: 17, color: "#fff", flexShrink: 0 },
-  disclaimer: { textAlign: "center", fontSize: 11, color: TEXT_MUTED, marginTop: 10 },
-  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 },
-  modal: { background: "#fff", borderRadius: 16, width: 480, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column", padding: 20 },
-  modalHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-  modalSub: { fontSize: 12, color: TEXT_MUTED, lineHeight: 1.5, margin: "0 0 12px" },
-  modalAddBox: { display: "flex", flexDirection: "column", gap: 8, background: "#F7F7F8", padding: 12, borderRadius: 10, border: `1px solid ${BORDER}`, marginBottom: 12 },
-  modalInput: { background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: TEXT_PRIMARY },
-  modalAddBtn: { background: ACCENT, color: "#fff", border: "none", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontWeight: 500, cursor: "pointer" },
-  modalKbList: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 },
-  modalKbItem: { display: "flex", gap: 8, background: "#F7F7F8", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 10, alignItems: "flex-start" },
-  modalKbTitle: { fontSize: 13, fontWeight: 500, marginBottom: 2, color: "#0E7C8C" },
-  modalKbContent: { fontSize: 12, color: TEXT_MUTED, lineHeight: 1.4 },
-  modalKbDeleteBtn: { background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: 13 },
-  modalEmptyText: { fontSize: 12, color: TEXT_MUTED, textAlign: "center", padding: 20 },
-};
+const authInputStyle = { border: "1px solid #E5E5E5", borderRadius: 10, padding: "11px 14px", fontSize: 14, color: "#0D0D0D" };
+const ghostBtnStyle = { background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 18 };
