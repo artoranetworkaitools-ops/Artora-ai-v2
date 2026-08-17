@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import Head from "next/head";
 
 const SIDEBAR_BG = "#171717";
@@ -13,6 +13,77 @@ const WELCOME = { role: "assistant", content: "Hi! I'm Artora AI. Ask me anythin
 
 function newConvo() {
   return { id: Date.now().toString(), title: "New chat", messages: [WELCOME] };
+}
+
+// Lightweight markdown renderer: bold, headers, bullet/numbered lists, paragraphs.
+// Deliberately dependency-free so the build never breaks over a missing package.
+function renderMarkdown(text) {
+  const lines = text.split("\n");
+  const blocks = [];
+  let listBuffer = [];
+  let listType = null;
+
+  function flushList() {
+    if (listBuffer.length === 0) return;
+    const Tag = listType === "ol" ? "ol" : "ul";
+    blocks.push(
+      <Tag key={blocks.length} style={{ margin: "6px 0", paddingLeft: 22 }}>
+        {listBuffer.map((item, i) => (
+          <li key={i} style={{ marginBottom: 4 }}>{renderInline(item)}</li>
+        ))}
+      </Tag>
+    );
+    listBuffer = [];
+    listType = null;
+  }
+
+  function renderInline(str) {
+    const parts = str.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      }
+      return <Fragment key={i}>{part}</Fragment>;
+    });
+  }
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
+    const numberedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+    const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+
+    if (headerMatch) {
+      flushList();
+      const level = headerMatch[1].length;
+      const size = level === 1 ? 19 : level === 2 ? 17 : 16;
+      blocks.push(
+        <div key={blocks.length} style={{ fontWeight: 600, fontSize: size, margin: "12px 0 4px" }}>
+          {renderInline(headerMatch[2])}
+        </div>
+      );
+    } else if (numberedMatch) {
+      if (listType !== "ol") flushList();
+      listType = "ol";
+      listBuffer.push(numberedMatch[1]);
+    } else if (bulletMatch) {
+      if (listType !== "ul") flushList();
+      listType = "ul";
+      listBuffer.push(bulletMatch[1]);
+    } else if (trimmed === "") {
+      flushList();
+      blocks.push(<div key={blocks.length} style={{ height: 8 }} />);
+    } else {
+      flushList();
+      blocks.push(
+        <div key={blocks.length} style={{ marginBottom: 4 }}>
+          {renderInline(line)}
+        </div>
+      );
+    }
+  });
+  flushList();
+  return blocks;
 }
 
 export default function Home() {
@@ -250,6 +321,15 @@ export default function Home() {
     }
   }
 
+  const headTags = (
+    <Head>
+      <title>Artora AI</title>
+      <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    </Head>
+  );
+
   if (authLoading) {
     return (
       <div style={styles.authLoadingScreen}>
@@ -261,11 +341,7 @@ export default function Home() {
   if (!user) {
     return (
       <>
-        <Head>
-          <title>Artora AI</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-        </Head>
+        {headTags}
         <div style={styles.authScreen}>
           <div className="auth-card" style={styles.authCard}>
             <div style={styles.authBrandRow}>
@@ -314,15 +390,9 @@ export default function Home() {
 
   return (
     <>
-      <Head>
-        <title>Artora AI</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-      </Head>
+      {headTags}
       <div style={styles.app}>
-        {isMobile && sidebarOpen && (
-          <div style={styles.mobileOverlay} onClick={() => setSidebarOpen(false)} />
-        )}
+        {isMobile && sidebarOpen && <div style={styles.mobileOverlay} onClick={() => setSidebarOpen(false)} />}
 
         <div
           className="sidebar"
@@ -382,16 +452,10 @@ export default function Home() {
               <span className="topbar-title" style={styles.topbarTitle}>{activeConvo.title}</span>
             </div>
             <div className="toggle-row" style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setWebSearch((v) => !v)}
-                style={{ ...styles.toggleBtn, ...(webSearch ? styles.toggleBtnActive : {}) }}
-              >
+              <button onClick={() => setWebSearch((v) => !v)} style={{ ...styles.toggleBtn, ...(webSearch ? styles.toggleBtnActive : {}) }}>
                 🌐 <span className="toggle-label">{webSearch ? "Search on" : "Search"}</span>
               </button>
-              <button
-                onClick={() => setDeepResearch((v) => !v)}
-                style={{ ...styles.toggleBtn, ...(deepResearch ? styles.toggleBtnActive : {}) }}
-              >
+              <button onClick={() => setDeepResearch((v) => !v)} style={{ ...styles.toggleBtn, ...(deepResearch ? styles.toggleBtnActive : {}) }}>
                 🔎 <span className="toggle-label">{deepResearch ? "Research on" : "Research"}</span>
               </button>
             </div>
@@ -399,18 +463,20 @@ export default function Home() {
 
           <div ref={scrollRef} style={styles.chatArea}>
             <div className="chat-inner" style={styles.chatInner}>
-              {activeConvo.messages.map((m, i) => (
-                <div key={i} className="msg-row" style={styles.msgRow}>
-                  <div style={{ ...styles.avatar, background: m.role === "assistant" ? ACCENT : "#E8E8E8", color: m.role === "assistant" ? "#fff" : TEXT_PRIMARY }}>
-                    {m.role === "assistant" ? "A" : "U"}
+              {activeConvo.messages.map((m, i) =>
+                m.role === "user" ? (
+                  <div key={i} className="msg-row-user" style={styles.msgRowUser}>
+                    <div className="user-bubble" style={styles.userBubble}>{m.content}</div>
                   </div>
-                  <div className="msg-text" style={styles.msgText}>{m.content}</div>
-                </div>
-              ))}
+                ) : (
+                  <div key={i} className="msg-row-assistant" style={styles.msgRowAssistant}>
+                    <div className="assistant-text" style={styles.assistantText}>{renderMarkdown(m.content)}</div>
+                  </div>
+                )
+              )}
               {loading && (
-                <div className="msg-row" style={styles.msgRow}>
-                  <div style={{ ...styles.avatar, background: ACCENT, color: "#fff" }}>A</div>
-                  <div style={{ ...styles.msgText, color: TEXT_MUTED }}>
+                <div className="msg-row-assistant" style={styles.msgRowAssistant}>
+                  <div style={{ ...styles.assistantText, color: TEXT_MUTED }}>
                     {deepResearch ? "Researching thoroughly..." : "Thinking..."}
                   </div>
                 </div>
@@ -473,8 +539,8 @@ export default function Home() {
 
         @media (max-width: 768px) {
           .chat-inner { padding: 16px 14px 8px !important; }
-          .msg-row { gap: 10px !important; margin-bottom: 18px !important; }
-          .msg-text { font-size: 14px !important; }
+          .msg-row-user, .msg-row-assistant { margin-bottom: 16px !important; }
+          .user-bubble, .assistant-text { font-size: 14px !important; }
           .input-bar-wrap { padding: 0 12px 14px !important; }
           .input-bar { border-radius: 20px !important; padding: 8px 8px 8px 14px !important; }
           .disclaimer { font-size: 10px !important; }
@@ -531,9 +597,26 @@ const styles = {
   toggleBtnActive: { background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT },
   chatArea: { flex: 1, overflowY: "auto" },
   chatInner: { maxWidth: 760, margin: "0 auto", padding: "24px 24px 8px" },
-  msgRow: { display: "flex", gap: 16, marginBottom: 24 },
-  avatar: { width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600, flexShrink: 0 },
-  msgText: { fontSize: 15, lineHeight: 1.7, whiteSpace: "pre-wrap", paddingTop: 3, minWidth: 0, wordBreak: "break-word" },
+  msgRowUser: { display: "flex", justifyContent: "flex-end", marginBottom: 20 },
+  msgRowAssistant: { display: "flex", justifyContent: "flex-start", marginBottom: 20 },
+  userBubble: {
+    maxWidth: "75%",
+    background: ACCENT,
+    color: "#fff",
+    borderRadius: 18,
+    padding: "10px 16px",
+    fontSize: 15,
+    lineHeight: 1.6,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  assistantText: {
+    maxWidth: "100%",
+    fontSize: 15,
+    lineHeight: 1.7,
+    color: TEXT_PRIMARY,
+    wordBreak: "break-word",
+  },
   errorBox: { fontSize: 12, color: "#E24B4A", padding: "8px 0" },
   inputBarWrap: { padding: "0 24px 20px" },
   inputBar: { maxWidth: 760, margin: "0 auto", display: "flex", gap: 10, alignItems: "flex-end", background: "#F7F7F8", border: `1px solid ${BORDER}`, borderRadius: 24, padding: "12px 12px 12px 18px", boxShadow: "0 2px 10px rgba(0,0,0,0.04)" },
