@@ -104,6 +104,7 @@ export default function Home() {
   const [deepResearch, setDeepResearch] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [kbModalOpen, setKbModalOpen] = useState(false);
   const [kbEntries, setKbEntries] = useState([]);
   const [newTitle, setNewTitle] = useState("");
@@ -451,13 +452,9 @@ export default function Home() {
               {!sidebarOpen && <button onClick={() => setSidebarOpen(true)} style={styles.menuBtn}>☰</button>}
               <span className="topbar-title" style={styles.topbarTitle}>{activeConvo.title}</span>
             </div>
-            <div className="toggle-row" style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setWebSearch((v) => !v)} style={{ ...styles.toggleBtn, ...(webSearch ? styles.toggleBtnActive : {}) }}>
-                🌐 <span className="toggle-label">{webSearch ? "Search on" : "Search"}</span>
-              </button>
-              <button onClick={() => setDeepResearch((v) => !v)} style={{ ...styles.toggleBtn, ...(deepResearch ? styles.toggleBtnActive : {}) }}>
-                🔎 <span className="toggle-label">{deepResearch ? "Research on" : "Research"}</span>
-              </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              {webSearch && <span style={styles.activePill}>🌐 Search</span>}
+              {deepResearch && <span style={styles.activePill}>🔎 Research</span>}
             </div>
           </div>
 
@@ -486,7 +483,43 @@ export default function Home() {
           </div>
 
           <div className="input-bar-wrap" style={styles.inputBarWrap}>
-            <div className="input-bar" style={styles.inputBar}>
+            <div className="input-bar" style={{ ...styles.inputBar, position: "relative" }}>
+              <button
+                onClick={() => setPlusMenuOpen((v) => !v)}
+                style={styles.plusBtn}
+                type="button"
+              >
+                +
+              </button>
+              {plusMenuOpen && (
+                <>
+                  <div style={styles.plusMenuOverlay} onClick={() => setPlusMenuOpen(false)} />
+                  <div style={styles.plusMenu}>
+                    <button
+                      onClick={() => { setWebSearch((v) => !v); setPlusMenuOpen(false); }}
+                      style={{ ...styles.plusMenuItem, ...(webSearch ? styles.plusMenuItemActive : {}) }}
+                    >
+                      <span>🌐</span>
+                      <span style={{ flex: 1, textAlign: "left" }}>
+                        <div style={{ fontWeight: 500 }}>Web search</div>
+                        <div style={{ fontSize: 11, color: TEXT_MUTED }}>Find real-time info from Google</div>
+                      </span>
+                      {webSearch && <span style={{ color: ACCENT }}>✓</span>}
+                    </button>
+                    <button
+                      onClick={() => { setDeepResearch((v) => !v); setPlusMenuOpen(false); }}
+                      style={{ ...styles.plusMenuItem, ...(deepResearch ? styles.plusMenuItemActive : {}) }}
+                    >
+                      <span>🔎</span>
+                      <span style={{ flex: 1, textAlign: "left" }}>
+                        <div style={{ fontWeight: 500 }}>Deep research</div>
+                        <div style={{ fontSize: 11, color: TEXT_MUTED }}>Thorough, well-checked answers</div>
+                      </span>
+                      {deepResearch && <span style={{ color: ACCENT }}>✓</span>}
+                    </button>
+                  </div>
+                </>
+              )}
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -595,6 +628,38 @@ const styles = {
   topbarTitle: { fontWeight: 600, fontSize: 14, color: TEXT_PRIMARY },
   toggleBtn: { background: "transparent", border: `1px solid ${BORDER}`, color: TEXT_MUTED, borderRadius: 20, padding: "6px 12px", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
   toggleBtnActive: { background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT },
+  activePill: { background: "rgba(24,156,177,0.1)", border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 20, padding: "4px 10px", fontSize: 11, whiteSpace: "nowrap" },
+  plusBtn: { width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${BORDER}`, cursor: "pointer", fontSize: 18, color: TEXT_MUTED, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" },
+  plusMenuOverlay: { position: "fixed", inset: 0, zIndex: 69 },
+  plusMenu: {
+    position: "absolute",
+    bottom: "calc(100% + 10px)",
+    left: 0,
+    width: 260,
+    background: "#fff",
+    border: `1px solid ${BORDER}`,
+    borderRadius: 14,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+    padding: 6,
+    zIndex: 70,
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+  },
+  plusMenuItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "transparent",
+    border: "none",
+    borderRadius: 8,
+    padding: "9px 10px",
+    cursor: "pointer",
+    fontSize: 13,
+    color: TEXT_PRIMARY,
+    textAlign: "left",
+  },
+  plusMenuItemActive: { background: "rgba(24,156,177,0.08)" },
   chatArea: { flex: 1, overflowY: "auto" },
   chatInner: { maxWidth: 760, margin: "0 auto", padding: "24px 24px 8px" },
   msgRowUser: { display: "flex", justifyContent: "flex-end", marginBottom: 20 },
