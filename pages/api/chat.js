@@ -1,25 +1,42 @@
-// Env vars needed: GROQ_API_KEY (required), TAVILY_API_KEY (optional, for web search)
+// Env vars needed: GROQ_API_KEY (required), TAVILY_API_KEY (optional)
 
-const KEY = "artora-ai-kb";
+const KB_KEY = "artora-ai-kb";
+const MEMORY_KEY = "artora-ai-memory";
+const MAX_MEMORY_ENTRIES = 300;
 
-async function getKBEntries() {
+async function upstashGet(key) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return [];
+  if (!url || !token) return null;
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(["GET", KEY]),
+      body: JSON.stringify(["GET", key]),
     });
     const data = await res.json();
-    return data.result ? JSON.parse(data.result) : [];
+    return data.result ? JSON.parse(data.result) : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-function findRelevant(entries, query) {
+async function upstashSet(key, value) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["SET", key, JSON.stringify(value)]),
+    });
+  } catch {
+    // silent fail — memory saving should never break the chat response
+  }
+}
+
+function findRelevant(entries, query, limit) {
   const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
   const scored = entries.map((e) => {
     const text = (e.title + " " + e.content).toLowerCase();
@@ -29,7 +46,7 @@ function findRelevant(entries, query) {
   return scored
     .filter((e) => e.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 4);
+    .slice(0, limit);
 }
 
 async function webSearch(query) {
@@ -43,9 +60,7 @@ async function webSearch(query) {
     });
     const data = await res.json();
     if (!data.results) return null;
-    return data.results
-      .map((r, i) => `[${i + 1}] ${r.title}: ${r.content}`.slice(0, 500))
-      .join("\n");
+    return data.results.map((r, i) => `[${i + 1}] ${r.title}: ${r.content}`.slice(0, 500)).join("\n");
   } catch {
     return null;
   }
@@ -70,34 +85,45 @@ export default async function handler(req, res) {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const query = lastUserMsg ? lastUserMsg.content : "";
 
-  const entries = await getKBEntries();
-  const relevant = findRelevant(entries, query);
-  const kbContext = relevant.length
-    ? "\n\nKnowledge base context:\n" + relevant.map((e) => `[${e.title}]\n${e.content}`).join("\n\n")
+  const kbEntriesRaw = (await upstashGet(KB_KEY)) || [];
+  const relevantKB = findRelevant(kbEntriesRaw, query, 4);
+  const kbContext = relevantKB.length
+    ? "\n\nKnowledge base:\n" + relevantKB.map((e) => `[${e.title}]\n${e.content}`).join("\n\n")
+    : "";
+
+  const memoryRaw = (await upstashGet(MEMORY_KEY)) || [];
+  const memoryAsEntries = memoryRaw.map((m) => ({
+    title: "Past conversation",
+    content: `User asked: ${m.user}\nAssistant answered: ${m.assistant}`,
+  }));
+  const relevantMemory = findRelevant(memoryAsEntries, query, 3);
+  const memoryContext = relevantMemory.length
+    ? "\n\nRelevant past conversations (for continuity, don't repeat verbatim, just use for context):\n" +
+      relevantMemory.map((e) => e.content).join("\n\n")
     : "";
 
   let searchContext = "";
   if (webSearchEnabled) {
     const results = await webSearch(query);
-    if (results) {
-      searchContext = "\n\nLive web search results:\n" + results;
-    }
+    if (results) searchContext = "\n\nLive web search results:\n" + results;
   }
 
   const systemPrompt =
-    "You are Artora AI, a helpful assistant for Artora Network (a creative growth ecosystem: Agency, Content Creation, Community, and Freelance Marketplace) and for general business tasks. " +
-    "Respond naturally in whichever language/register the user writes in (Hinglish, English, or Urdu). Be direct, practical, and concise. " +
-    "Use the knowledge base and web search context below when relevant, but never mention 'knowledge base' or 'context' explicitly — answer naturally as if you simply know it." +
+    "You are Artora AI, a helpful assistant for Artora Network (a creative growth ecosystem: Agency, Content Creation, Community, and Freelance Marketplace) and for general business tasks.\n\n" +
+    "LANGUAGE RULE (very important): Always reply in the exact same language and script the user just used in their latest message:\n" +
+    "- Plain English in, plain English out.\n" +
+    "- Urdu script (اردو) in, Urdu script out.\n" +
+    "- Roman Urdu / Hinglish in (Urdu or Hindi words spelled in English letters), Roman Urdu / Hinglish out.\n" +
+    "Match their most recent message specifically, even if earlier messages were in a different language.\n\n" +
+    "Be direct, practical, and concise. Use the knowledge base and past-conversation context below when relevant, but never mention 'knowledge base', 'memory', or 'context' explicitly — answer naturally as if you simply know it." +
     kbContext +
+    memoryContext +
     searchContext;
 
   try {
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
         messages: [
@@ -115,7 +141,15 @@ export default async function handler(req, res) {
     }
 
     const data = await groqRes.json();
-    const reply = data.choices?.[0]?.message?.content || "Maazrat, jawab nahi bana.";
+    const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a reply.";
+
+    // Auto-save this exchange to shared memory (fire and forget, never blocks the reply)
+    const updatedMemory = [
+      ...memoryRaw,
+      { id: Date.now().toString(), user: query, assistant: reply },
+    ].slice(-MAX_MEMORY_ENTRIES);
+    upstashSet(MEMORY_KEY, updatedMemory);
+
     return res.status(200).json({ reply });
   } catch (err) {
     return res.status(500).json({ error: "Server error." });
