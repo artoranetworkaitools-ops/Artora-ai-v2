@@ -27,8 +27,8 @@ const DARK = {
 
 const WELCOME = { role: "assistant", content: "Hi! I'm Artora AI. Ask me anything — I'll reply in whichever language you write in." };
 
-function newConvo() {
-  return { id: Date.now().toString(), title: "New chat", messages: [WELCOME] };
+function newConvo(projectId = null) {
+  return { id: Date.now().toString(), title: "New chat", messages: [WELCOME], projectId };
 }
 
 // Lightweight markdown renderer: bold, headers, bullet/numbered lists, paragraphs.
@@ -127,6 +127,10 @@ export default function Home() {
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [expandedProjects, setExpandedProjects] = useState({});
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -180,6 +184,39 @@ export default function Home() {
     setConvos(saved);
     setActiveId(saved[0].id);
     loadKB();
+    let savedProjects = [];
+    try {
+      savedProjects = JSON.parse(localStorage.getItem("artora-ai-projects") || "[]");
+    } catch {
+      savedProjects = [];
+    }
+    setProjects(savedProjects);
+  }
+
+  useEffect(() => {
+    if (projects.length >= 0 && user) localStorage.setItem("artora-ai-projects", JSON.stringify(projects));
+  }, [projects, user]);
+
+  function createProject() {
+    const name = newProjectName.trim();
+    if (!name) return;
+    setProjects((prev) => [...prev, { id: Date.now().toString(), name }]);
+    setNewProjectName("");
+    setNewProjectOpen(false);
+  }
+
+  function deleteProject(id, e) {
+    e.stopPropagation();
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setConvos((prev) => prev.map((cv) => (cv.projectId === id ? { ...cv, projectId: null } : cv)));
+  }
+
+  function toggleProjectExpand(id) {
+    setExpandedProjects((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function moveConvoToProject(convoId, projectId) {
+    setConvos((prev) => prev.map((cv) => (cv.id === convoId ? { ...cv, projectId: projectId || null } : cv)));
   }
 
   useEffect(() => {
@@ -506,15 +543,85 @@ export default function Home() {
             <span>{theme === "light" ? "🌙" : "☀️"}</span> {theme === "light" ? "Dark mode" : "Light mode"}
           </button>
 
+          <div style={{ fontSize: 11, color: "#8E8E8E", padding: "6px 12px 4px", textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Projects</span>
+            <button onClick={() => setNewProjectOpen((v) => !v)} style={{ background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 14 }}>+</button>
+          </div>
+          {newProjectOpen && (
+            <div style={{ display: "flex", gap: 4, padding: "0 8px 8px" }}>
+              <input
+                autoFocus
+                placeholder="Project name"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && createProject()}
+                style={{ flex: 1, background: "#212121", border: "1px solid #3A3A3A", borderRadius: 6, padding: "6px 8px", fontSize: 12, color: "#ECECEC" }}
+              />
+              <button onClick={createProject} style={{ background: ACCENT, border: "none", borderRadius: 6, padding: "0 10px", fontSize: 12, color: "#fff", cursor: "pointer" }}>Add</button>
+            </div>
+          )}
+          <div style={{ maxHeight: "30%", overflowY: "auto", marginBottom: 4 }}>
+            {projects.map((p) => {
+              const projectConvos = convos.filter((cv) => cv.projectId === p.id);
+              const isOpen = !!expandedProjects[p.id];
+              return (
+                <div key={p.id}>
+                  <div onClick={() => toggleProjectExpand(p.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, cursor: "pointer", gap: 6 }}>
+                    <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span>{isOpen ? "📂" : "📁"}</span>
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
+                      <span style={{ color: "#8E8E8E", fontSize: 11 }}>({projectConvos.length})</span>
+                    </span>
+                    <button onClick={(e) => deleteProject(p.id, e)} style={{ background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 11, flexShrink: 0 }}>✕</button>
+                  </div>
+                  {isOpen && (
+                    <div style={{ paddingLeft: 20 }}>
+                      {projectConvos.length === 0 && <div style={{ fontSize: 11, color: "#6B6B6B", padding: "4px 12px" }}>Koi chat nahi</div>}
+                      {projectConvos.map((cv) => (
+                        <div key={cv.id} onClick={() => selectConvo(cv.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 12px", borderRadius: 8, cursor: "pointer", gap: 6, background: cv.id === activeId ? "#2A2A2A" : "transparent" }}>
+                          <span style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{cv.title}</span>
+                          <select
+                            value={cv.projectId || ""}
+                            onChange={(e) => moveConvoToProject(cv.id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ background: "#212121", color: "#ECECEC", border: "1px solid #3A3A3A", borderRadius: 4, fontSize: 10, padding: "1px 2px", flexShrink: 0 }}
+                          >
+                            <option value="">No project</option>
+                            {projects.map((pp) => (
+                              <option key={pp.id} value={pp.id}>{pp.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
           <div style={{ fontSize: 11, color: "#8E8E8E", padding: "6px 12px 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Recents</div>
           <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-            {convos.map((cv) => (
+            {convos.filter((cv) => !cv.projectId).map((cv) => (
               <div
                 key={cv.id}
                 onClick={() => selectConvo(cv.id)}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 8, cursor: "pointer", gap: 8, background: cv.id === activeId ? "#2A2A2A" : "transparent" }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 8, cursor: "pointer", gap: 6, background: cv.id === activeId ? "#2A2A2A" : "transparent" }}
               >
                 <span style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{cv.title}</span>
+                {projects.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => moveConvoToProject(cv.id, e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ background: "#212121", color: "#ECECEC", border: "1px solid #3A3A3A", borderRadius: 4, fontSize: 10, padding: "1px 2px", flexShrink: 0 }}
+                  >
+                    <option value="">📁 Move</option>
+                    {projects.map((pp) => (
+                      <option key={pp.id} value={pp.id}>{pp.name}</option>
+                    ))}
+                  </select>
+                )}
                 <button onClick={(e) => deleteConvo(cv.id, e)} style={{ background: "transparent", border: "none", color: "#8E8E8E", cursor: "pointer", fontSize: 11, flexShrink: 0 }}>✕</button>
               </div>
             ))}
