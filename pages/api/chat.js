@@ -57,6 +57,9 @@ export default async function handler(req, res) {
 
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const query = lastUserMsg ? lastUserMsg.content : "";
+  // Only send the most recent messages to keep each request light on tokens
+  // (free-tier rate limits are per-minute, so trimming avoids hitting them).
+  const trimmedMessages = messages.slice(-12);
 
   const kbEntriesRaw = (await dbGet(KB_KEY)) || [];
   const relevantKB = findRelevant(kbEntriesRaw, query, 4);
@@ -102,23 +105,36 @@ export default async function handler(req, res) {
     researchInstruction;
 
   try {
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages.map((m) => ({ role: m.role, content: m.content })),
-        ],
-        max_tokens: deepResearch ? 2000 : 1000,
-        temperature: deepResearch ? 0.4 : 0.7,
-      }),
-    });
+    const modelsToTry = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
+    let groqRes = null;
+    let lastErrText = "";
 
-    if (!groqRes.ok) {
-      const errText = await groqRes.text();
-      return res.status(500).json({ error: "Groq API error: " + errText.slice(0, 200) });
+    for (const model of modelsToTry) {
+      groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...trimmedMessages.map((m) => ({ role: m.role, content: m.content })),
+          ],
+          max_tokens: deepResearch ? 2000 : 1000,
+          temperature: deepResearch ? 0.4 : 0.7,
+        }),
+      });
+
+      if (groqRes.ok) break;
+
+      // Rate limit or model unavailable — silently try the next model in the list.
+      lastErrText = await groqRes.text();
+      const shouldFallback = groqRes.status === 429 || groqRes.status === 404 || /model_not_found|rate.?limit/i.test(lastErrText);
+      if (!shouldFallback) break;
+      groqRes = null;
+    }
+
+    if (!groqRes || !groqRes.ok) {
+      return res.status(500).json({ error: "Sab AI models is waqt busy hain. Thodi der mein dobara try karein. (" + lastErrText.slice(0, 150) + ")" });
     }
 
     const data = await groqRes.json();
