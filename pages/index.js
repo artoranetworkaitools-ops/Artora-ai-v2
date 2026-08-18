@@ -125,8 +125,12 @@ function renderMarkdown(text) {
     const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
     const numberedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
     const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+    const hrMatch = /^(-{3,}|\*{3,}|_{3,})$/.test(trimmed);
 
-    if (headerMatch) {
+    if (hrMatch) {
+      flushList();
+      blocks.push(<hr key={blocks.length} style={{ border: "none", borderTop: "1px solid rgba(128,128,128,0.25)", margin: "14px 0" }} />);
+    } else if (headerMatch) {
       flushList();
       const level = headerMatch[1].length;
       const size = level === 1 ? 19 : level === 2 ? 17 : 16;
