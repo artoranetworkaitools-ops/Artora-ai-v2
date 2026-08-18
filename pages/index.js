@@ -38,6 +38,54 @@ function renderMarkdown(text) {
   const blocks = [];
   let listBuffer = [];
   let listType = null;
+  let tableBuffer = [];
+
+  function isTableRow(line) {
+    return /^\|.*\|$/.test(line.trim());
+  }
+  function isTableSeparator(line) {
+    return /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(line.trim());
+  }
+  function parseTableRow(line) {
+    return line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+  }
+
+  function flushTable() {
+    if (tableBuffer.length === 0) return;
+    const rows = tableBuffer.filter((r) => !isTableSeparator(r)).map(parseTableRow);
+    if (rows.length === 0) {
+      tableBuffer = [];
+      return;
+    }
+    const [header, ...body] = rows;
+    blocks.push(
+      <div key={blocks.length} style={{ overflowX: "auto", margin: "10px 0" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
+          <thead>
+            <tr>
+              {header.map((h, i) => (
+                <th key={i} style={{ textAlign: "left", padding: "8px 12px", borderBottom: "2px solid currentColor", opacity: 0.85, fontWeight: 600 }}>
+                  {renderInline(h)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci} style={{ padding: "8px 12px", borderBottom: "1px solid rgba(128,128,128,0.25)", verticalAlign: "top" }}>
+                    {renderInline(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    tableBuffer = [];
+  }
 
   function flushList() {
     if (listBuffer.length === 0) return;
@@ -65,6 +113,15 @@ function renderMarkdown(text) {
 
   lines.forEach((line) => {
     const trimmed = line.trim();
+
+    if (isTableRow(trimmed)) {
+      flushList();
+      tableBuffer.push(trimmed);
+      return;
+    } else if (tableBuffer.length > 0) {
+      flushTable();
+    }
+
     const headerMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
     const numberedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
     const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
@@ -95,6 +152,7 @@ function renderMarkdown(text) {
     }
   });
   flushList();
+  flushTable();
   return blocks;
 }
 
